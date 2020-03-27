@@ -203,6 +203,7 @@ class Pear
     analyze_imports
     analyze_resources
     analyze_strings
+    true
   rescue StandardError => e
     puts 'Error:'.hl(:red)
     puts e.hl(:red)
@@ -217,16 +218,16 @@ class Pear
   end
 
   def analyze_sections
-    puts ('Analyzing ' + pluralize(dump.pe.section_table.size, 'Sections')).hl(:blue)
+    puts "Analyzing #{pluralize(dump.pe.section_table.size, 'Sections')}".hl(:blue)
     dump.pe.section_table.each do |section|
       section_name = section.Name
       if section_name.in? Pear::POPULAR_SECTION_NAMES.keys.map(&:to_s)
-        section_name_notice = ('Unsuspicious section name: ' + section_name).hl(:green)
+        section_name_notice = "Unsuspicious section name: #{section_name}".hl(:green)
       elsif section_name.in? Pear::COMMON_SECTION_NAMES.keys.map(&:to_s)
-        section_name_notice = ('Known packer section name: ' + section_name + " (" + Pear::COMMON_SECTION_NAMES[section_name.to_sym] + ")").hl(:yellow)
+        section_name_notice = "Known packer section name: #{section_name} (#{Pear::COMMON_SECTION_NAMES[section_name.to_sym]})".hl(:yellow)
         warnings << section_name_notice
       else
-        section_name_notice = ('Unrecognized section name: ' + section_name).hl(:red)
+        section_name_notice = "Unrecognized section name: #{section_name}".hl(:red)
         warnings << section_name_notice
       end
       puts section_name_notice
@@ -243,7 +244,7 @@ class Pear
   end
 
   def analyze_imports
-    puts ('Analyzing ' + pluralize(dump.imports.size, 'Import')).hl(:blue)
+    puts "Analyzing #{pluralize(dump.imports.size, 'Import')}".hl(:blue)
     dump.imports.each do |import|
       puts import.module_name
       # puts Digest::MD5.hexdigest import.module_name
@@ -251,14 +252,14 @@ class Pear
   end
 
   def analyze_resources
-    puts ('Analyzing ' + pluralize(dump.resources.size, 'Resource')).hl(:blue)
+    puts "Analyzing #{pluralize(dump.resources.size, 'Resource')}".hl(:blue)
     dump.resources.each do |resource|
       puts resource
     end
   end
 
   def analyze_strings
-    puts ('Analyzing ' + pluralize(dump.strings.size, 'String')).hl(:blue)
+    puts "Analyzing #{pluralize(dump.strings.size, 'String')}".hl(:blue)
     dump.strings.each do |string|
       puts string
     end
@@ -268,15 +269,19 @@ end
 puts 'Running PE Analyzer in Ruby v0.1'.hl(:blue)
 pear = Pear.new(path: ARGV[0])
 if pear.path
-  pear.static_analysis
-  puts ('Static analysis completed successfully.').hl(:green)
+	puts "Starting analysis of #{pear.path}".hl(:blue)
+  if pear.static_analysis
+    puts 'Static analysis completed successfully.'.hl(:green)
+  else
+    puts 'Static analysis failed to complete successfully.'.hl(:red)
+  end
   if pear.warnings.empty?
     puts '0 Warnings'.hl(:green)
   else
-  	puts (pluralize(pear.warnings.size, 'Warning') + ':').hl(:yellow)
-    pear.warnings.each { |warning| puts warning.hl(:red) }
+    puts (pluralize(pear.warnings.size, 'Warning').+':').hl(:yellow)
+    pear.warnings.each { |warning| puts warning }
   end
 else
-  puts 'Path not provided.'.hl(:red)
+  puts 'Path to PE file required.'.hl(:red)
 end
 puts 'Terminating PEar successfully!'.hl(:green)
