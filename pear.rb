@@ -10,6 +10,7 @@ include ActionView::Helpers::TextHelper
 class Pear
   attr_reader :path, :dump, :warnings
 
+  # source: http://www.hexacorn.com/blog/2016/12/15/pe-section-names-re-visited/
   POPULAR_SECTION_NAMES = {
     '.00cfg': 'Control Flow Guard (CFG) section (added by newer versions of Visual Studio)',
     '.apiset': 'a section present inside the apisetschema.dll',
@@ -266,10 +267,12 @@ class Pear
   end
 end
 
-puts 'Running PE Analyzer in Ruby v0.1'.hl(:blue)
+puts 'Running PE Analyzer in Ruby (PEar) v0.1'.hl(:blue)
 pear = Pear.new(path: ARGV[0])
-if pear.path
-	puts "Starting analysis of #{pear.path}".hl(:blue)
+unless pear.path
+  puts 'Path to PE file required.'.hl(:red)
+else
+  puts "Starting analysis of #{pear.path}".hl(:blue)
   if pear.static_analysis
     puts 'Static analysis completed successfully.'.hl(:green)
   else
@@ -281,7 +284,5 @@ if pear.path
     puts (pluralize(pear.warnings.size, 'Warning').+':').hl(:yellow)
     pear.warnings.each { |warning| puts warning }
   end
-else
-  puts 'Path to PE file required.'.hl(:red)
 end
 puts 'Terminating PEar successfully!'.hl(:green)
