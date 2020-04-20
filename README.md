@@ -7,6 +7,14 @@ PEar intends to perform static malware analysis on PE (.exe, et al) files.
     bundle
     ruby pear.rb <filename>
 
+## Static Analysis Checklist
+
+ - Compares timestamps
+ - Checks strings for URIs
+ - Checks and returns imphash
+ - ~~Checks section names~~
+ - ~~Checks section sizes~~
+
 ## Components
 
  - [PEdump](https://github.com/zed-0xff/pedump)

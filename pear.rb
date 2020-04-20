@@ -1,14 +1,17 @@
 # frozen_string_literal: true
 
+require 'os'
 require 'pedump'
-require 'digest'
+require 'digest/md5'
 require 'action_view'
 require 'colors'
 
 include ActionView::Helpers::TextHelper
 
 class Pear
-  attr_reader :path, :dump, :warnings
+  attr_reader :path, :dump, :hash, :warnings
+
+  URL_REGEX = '/https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{2,256}\.[a-z]{2,4}\b([-a-zA-Z0-9@:%_\+.~#?&//=]*)/'
 
   # source: http://www.hexacorn.com/blog/2016/12/15/pe-section-names-re-visited/
   POPULAR_SECTION_NAMES = {
@@ -191,6 +194,7 @@ class Pear
   def initialize(**params)
     @path = params[:path]
     @dump = PEdump.dump @path
+    @hash = Digest::MD5.hexdigest(File.open(@path).read)
     @warnings = []
   end
 
@@ -207,7 +211,7 @@ class Pear
     true
   rescue StandardError => e
     puts 'Error:'.hl(:red)
-    puts e.hl(:red)
+    puts e&.hl(:red)
     nil
   end
 
@@ -246,9 +250,10 @@ class Pear
 
   def analyze_imports
     puts "Analyzing #{pluralize(dump.imports.size, 'Import')}".hl(:blue)
-    dump.imports.each do |import|
+    imports = dump.imports
+    # imphash = Digest::MD5.hexdigest imports.map(&:?).join
+    imports.each do |import|
       puts import.module_name
-      # puts Digest::MD5.hexdigest import.module_name
     end
   end
 
@@ -262,7 +267,8 @@ class Pear
   def analyze_strings
     puts "Analyzing #{pluralize(dump.strings.size, 'String')}".hl(:blue)
     dump.strings.each do |string|
-      puts string
+      suspicious = (URL_REGEX =~ string)
+      puts string.hl(suspicious ? :green : :red)
     end
   end
 end
@@ -283,6 +289,7 @@ else
   else
     puts (pluralize(pear.warnings.size, 'Warning').+':').hl(:yellow)
     pear.warnings.each { |warning| puts warning }
+    system OS.open_file_command, 'https://www.virustotal.com/gui/file/' + pear.hash unless true
   end
 end
 puts 'Terminating PEar successfully!'.hl(:green)
