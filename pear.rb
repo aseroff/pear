@@ -11,7 +11,7 @@ include ActionView::Helpers::TextHelper
 class Pear
   attr_reader :path, :dump, :hash, :warnings
 
-  URL_REGEX = '/https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{2,256}\.[a-z]{2,4}\b([-a-zA-Z0-9@:%_\+.~#?&//=]*)/'
+  URL_REGEX = /\A(?:(?:https?|ftp):\/\/)(?:\S+(?::\S*)?@)?(?:(?!10(?:\.\d{1,3}){3})(?!127(?:\.\d{1,3}){3})(?!169\.254(?:\.\d{1,3}){2})(?!192\.168(?:\.\d{1,3}){2})(?!172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})(?:[1-9]\d?|1\d\d|2[01]\d|22[0-3])(?:\.(?:1?\d{1,2}|2[0-4]\d|25[0-5])){2}(?:\.(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-4]))|(?:(?:[a-z\u00a1-\uffff0-9]+-?)*[a-z\u00a1-\uffff0-9]+)(?:\.(?:[a-z\u00a1-\uffff0-9]+-?)*[a-z\u00a1-\uffff0-9]+)*(?:\.(?:[a-z\u00a1-\uffff]{2,})))(?::\d{2,5})?(?:\/[^\s]*)?\z/i
 
   # source: http://www.hexacorn.com/blog/2016/12/15/pe-section-names-re-visited/
   POPULAR_SECTION_NAMES = {
@@ -198,7 +198,15 @@ class Pear
     @warnings = []
   end
 
+  def log(message, level = :default)
+    colors = {warn: :red, suspicious: :yellow, success: :green, info: :blue, default: :yellow}
+    message = (level == :default ? message : message.hl(colors[level].to_sym))
+    warnings << message if level.in? [:warn, :suspicious]
+    puts message
+  end
+
   def static_analysis
+    log "Starting analysis of #{path}", :info
     unless dump.pe?
       puts 'Not a PE file'.hl(:red)
       return
@@ -216,59 +224,63 @@ class Pear
   end
 
   def analyze_headers
-    puts 'Analyzing File Header'.hl(:blue)
+    log 'Analyzing File Header', :info
     # ap dump.pe.image_file_header
-    puts 'Analyzing File Optional Header'.hl(:blue)
+    log 'Analyzing File Optional Header', :info
     # ap dump.pe.image_optional_header
   end
 
   def analyze_sections
-    puts "Analyzing #{pluralize(dump.pe.section_table.size, 'Sections')}".hl(:blue)
+    log "Analyzing #{pluralize(dump.pe.section_table.size, 'Sections')}", :info
     dump.pe.section_table.each do |section|
       section_name = section.Name
       if section_name.in? Pear::POPULAR_SECTION_NAMES.keys.map(&:to_s)
-        section_name_notice = "Unsuspicious section name: #{section_name}".hl(:green)
+        log "Unsuspicious section name: #{section_name}"
       elsif section_name.in? Pear::COMMON_SECTION_NAMES.keys.map(&:to_s)
-        section_name_notice = "Known packer section name: #{section_name} (#{Pear::COMMON_SECTION_NAMES[section_name.to_sym]})".hl(:yellow)
-        warnings << section_name_notice
+        log "Known packer section name: #{section_name} (#{Pear::COMMON_SECTION_NAMES[section_name.to_sym]})", :suspicious
       else
-        section_name_notice = "Unrecognized section name: #{section_name}".hl(:red)
-        warnings << section_name_notice
+        log "Unrecognized section name: #{section_name}", :warn
       end
-      puts section_name_notice
       vsize = section.VirtualSize
       rsize = section.SizeOfRawData
       if rsize < vsize * 0.2
-        section_size_notice = "Vast discrepancy between virtual size (#{vsize}) and raw size (#{rsize}) of section #{section_name} (possible unpacking)!".hl(:red)
-        warnings << section_size_notice
+        log "Vast discrepancy between virtual size (#{vsize}) and raw size (#{rsize}) of section #{section_name} (possible unpacking)!", :warn
       else
-        section_size_notice = "Virtual size (#{vsize}) and raw size (#{rsize}) of section seem normal.".hl(:green)
+        log "Virtual size (#{vsize}) and raw size (#{rsize}) of section seem normal."
       end
-      puts section_size_notice
     end
   end
 
   def analyze_imports
-    puts "Analyzing #{pluralize(dump.imports.size, 'Import')}".hl(:blue)
+    log "Analyzing #{pluralize(dump.imports.size, 'Import')}", :info
     imports = dump.imports
-    # imphash = Digest::MD5.hexdigest imports.map(&:?).join
+    formatted_imports = []
     imports.each do |import|
-      puts import.module_name
+      log "#{import.module_name}: #{import.first_thunk.map(&:name).join(', ')}"
+      import.first_thunk.each do |function|
+        formatted_imports << "#{import.module_name.split('.').first.downcase}.#{function.name.downcase}"
+      end
     end
+    imphash = Digest::MD5.hexdigest formatted_imports.join(',')
+    log "Imphash: #{imphash}"
   end
 
   def analyze_resources
-    puts "Analyzing #{pluralize(dump.resources.size, 'Resource')}".hl(:blue)
-    dump.resources.each do |resource|
-      puts resource
+    log "Analyzing #{pluralize(dump.resources.size, 'Resource')}", :info
+      dump.resources.each do |resource|
+        log "#{resource.name} (#{resource.type}): #{resource.size} bytes"
     end
   end
 
   def analyze_strings
-    puts "Analyzing #{pluralize(dump.strings.size, 'String')}".hl(:blue)
+    log "Analyzing #{pluralize(dump.strings.size, 'String')}", :info
     dump.strings.each do |string|
-      suspicious = (URL_REGEX =~ string)
-      puts string.hl(suspicious ? :green : :red)
+      url = URL_REGEX.match string.value
+      if url
+        log "URL found in strings: #{string.value}", :warn
+      else
+        log string.value
+      end
     end
   end
 end
@@ -278,18 +290,17 @@ pear = Pear.new(path: ARGV[0])
 unless pear.path
   puts 'Path to PE file required.'.hl(:red)
 else
-  puts "Starting analysis of #{pear.path}".hl(:blue)
   if pear.static_analysis
-    puts 'Static analysis completed successfully.'.hl(:green)
+    pear.log 'Static analysis completed successfully.', :success
   else
-    puts 'Static analysis failed to complete successfully.'.hl(:red)
+    pear.log 'Static analysis failed to complete successfully.', :warn
   end
   if pear.warnings.empty?
-    puts '0 Warnings'.hl(:green)
+    pear.log  '0 Warnings', :success
   else
     puts (pluralize(pear.warnings.size, 'Warning').+':').hl(:yellow)
     pear.warnings.each { |warning| puts warning }
-    system OS.open_file_command, 'https://www.virustotal.com/gui/file/' + pear.hash unless true
+    system OS.open_file_command, 'https://www.virustotal.com/gui/file/' + pear.hash unless ARGV[1] == '-nvt'
   end
 end
 puts 'Terminating PEar successfully!'.hl(:green)
