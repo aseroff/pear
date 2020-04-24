@@ -11,7 +11,7 @@ include ActionView::Helpers::TextHelper
 class Pear
   attr_reader :path, :dump, :hash, :warnings
 
-  URL_REGEX = /\A(?:(?:https?|ftp):\/\/)(?:\S+(?::\S*)?@)?(?:(?!10(?:\.\d{1,3}){3})(?!127(?:\.\d{1,3}){3})(?!169\.254(?:\.\d{1,3}){2})(?!192\.168(?:\.\d{1,3}){2})(?!172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})(?:[1-9]\d?|1\d\d|2[01]\d|22[0-3])(?:\.(?:1?\d{1,2}|2[0-4]\d|25[0-5])){2}(?:\.(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-4]))|(?:(?:[a-z\u00a1-\uffff0-9]+-?)*[a-z\u00a1-\uffff0-9]+)(?:\.(?:[a-z\u00a1-\uffff0-9]+-?)*[a-z\u00a1-\uffff0-9]+)*(?:\.(?:[a-z\u00a1-\uffff]{2,})))(?::\d{2,5})?(?:\/[^\s]*)?\z/i
+  URL_REGEX = %r{\A(?:(?:https?|ftp)://)(?:\S+(?::\S*)?@)?(?:(?!10(?:\.\d{1,3}){3})(?!127(?:\.\d{1,3}){3})(?!169\.254(?:\.\d{1,3}){2})(?!192\.168(?:\.\d{1,3}){2})(?!172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})(?:[1-9]\d?|1\d\d|2[01]\d|22[0-3])(?:\.(?:1?\d{1,2}|2[0-4]\d|25[0-5])){2}(?:\.(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-4]))|(?:(?:[a-z\u00a1-\uffff0-9]+-?)*[a-z\u00a1-\uffff0-9]+)(?:\.(?:[a-z\u00a1-\uffff0-9]+-?)*[a-z\u00a1-\uffff0-9]+)*(?:\.(?:[a-z\u00a1-\uffff]{2,})))(?::\d{2,5})?(?:/[^\s]*)?\z}i.freeze
 
   # source: http://www.hexacorn.com/blog/2016/12/15/pe-section-names-re-visited/
   POPULAR_SECTION_NAMES = {
@@ -199,9 +199,9 @@ class Pear
   end
 
   def log(message, level = :default)
-    colors = {warn: :red, suspicious: :yellow, success: :green, info: :blue, default: :yellow}
+    colors = { warn: :red, suspicious: :yellow, success: :green, info: :blue, default: :yellow }
     message = (level == :default ? message : message.hl(colors[level].to_sym))
-    warnings << message if level.in? [:warn, :suspicious]
+    warnings << message if level.in? %i[warn suspicious]
     puts message
   end
 
@@ -255,20 +255,31 @@ class Pear
     log "Analyzing #{pluralize(dump.imports.size, 'Import')}", :info
     imports = dump.imports
     formatted_imports = []
+    imphash_failure = false
     imports.each do |import|
-      log "#{import.module_name}: #{import.first_thunk.map(&:name).join(', ')}"
       import.first_thunk.each do |function|
-        formatted_imports << "#{import.module_name.split('.').first.downcase}.#{function.name.downcase}"
+        imphash_name = import.module_name.split('.').first + '.' + (function.name || function.ordinal.to_s)
+        if function.name && !imphash_failure
+          log imphash_name
+          formatted_imports << imphash_name.downcase
+        else
+          unless imphash_failure
+            puts 'This script cannot resolve the name of ordinally linked functions. Imphash cannot be calculated.'.hl(:yellow)
+            imphash_failure = true
+          end
+          log imphash_name
+        end
       end
     end
-    imphash = Digest::MD5.hexdigest formatted_imports.join(',')
-    log "Imphash: #{imphash}"
+    unless imphash_failure
+      log "Imphash: #{Digest::MD5.hexdigest formatted_imports.join(',')}"
+    end
   end
 
   def analyze_resources
     log "Analyzing #{pluralize(dump.resources.size, 'Resource')}", :info
-      dump.resources.each do |resource|
-        log "#{resource.name} (#{resource.type}): #{resource.size} bytes"
+    dump.resources.each do |resource|
+      log "#{resource.name} (#{resource.type}): #{resource.size} bytes"
     end
   end
 
@@ -287,20 +298,22 @@ end
 
 puts 'Running PE Analyzer in Ruby (PEar) v0.1'.hl(:blue)
 pear = Pear.new(path: ARGV[0])
-unless pear.path
-  puts 'Path to PE file required.'.hl(:red)
-else
+if pear.path
   if pear.static_analysis
     pear.log 'Static analysis completed successfully.', :success
   else
     pear.log 'Static analysis failed to complete successfully.', :warn
   end
   if pear.warnings.empty?
-    pear.log  '0 Warnings', :success
+    pear.log '0 Warnings', :success
   else
-    puts (pluralize(pear.warnings.size, 'Warning').+':').hl(:yellow)
+    puts pluralize(pear.warnings.size, 'Warning').+':'.hl(:yellow)
     pear.warnings.each { |warning| puts warning }
-    system OS.open_file_command, 'https://www.virustotal.com/gui/file/' + pear.hash unless ARGV[1] == '-nvt'
+    unless ARGV[1] == '-nvt'
+      system OS.open_file_command, 'https://www.virustotal.com/gui/file/' + pear.hash
+    end
   end
+else
+  puts 'Path to PE file required.'.hl(:red)
 end
 puts 'Terminating PEar successfully!'.hl(:green)
