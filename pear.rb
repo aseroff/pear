@@ -3,15 +3,17 @@
 require 'os'
 require 'pedump'
 require 'digest/md5'
+require 'date'
 require 'action_view'
 require 'colors'
 
-include ActionView::Helpers::TextHelper
-
 class Pear
   attr_reader :path, :dump, :hash, :warnings
+  include ActionView::Helpers::TextHelper
 
   URL_REGEX = %r{\A(?:(?:https?|ftp)://)(?:\S+(?::\S*)?@)?(?:(?!10(?:\.\d{1,3}){3})(?!127(?:\.\d{1,3}){3})(?!169\.254(?:\.\d{1,3}){2})(?!192\.168(?:\.\d{1,3}){2})(?!172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})(?:[1-9]\d?|1\d\d|2[01]\d|22[0-3])(?:\.(?:1?\d{1,2}|2[0-4]\d|25[0-5])){2}(?:\.(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-4]))|(?:(?:[a-z\u00a1-\uffff0-9]+-?)*[a-z\u00a1-\uffff0-9]+)(?:\.(?:[a-z\u00a1-\uffff0-9]+-?)*[a-z\u00a1-\uffff0-9]+)*(?:\.(?:[a-z\u00a1-\uffff]{2,})))(?::\d{2,5})?(?:/[^\s]*)?\z}i.freeze
+
+  SCARY_RESOURCE_TYPES = %w[EXE DLL].freeze
 
   # source: http://www.hexacorn.com/blog/2016/12/15/pe-section-names-re-visited/
   POPULAR_SECTION_NAMES = {
@@ -97,7 +99,7 @@ class Pear
     'text': 'Alternative Code Section'
   }.freeze
 
-  COMMON_SECTION_NAMES = {
+  COMMON_PACKER_SECTION_NAMES = {
     '.aspack': 'Aspack packer',
     '.adata': 'Aspack packer/Armadillo packer',
     'ASPack': 'Aspack packer',
@@ -199,7 +201,7 @@ class Pear
   end
 
   def log(message, level = :default)
-    colors = { warn: :red, suspicious: :yellow, success: :green, info: :blue, default: :yellow }
+    colors = { warn: :red, suspicious: :yellow, success: :green, info: :blue }
     message = (level == :default ? message : message.hl(colors[level].to_sym))
     warnings << message if level.in? %i[warn suspicious]
     puts message
@@ -225,9 +227,11 @@ class Pear
 
   def analyze_headers
     log 'Analyzing File Header', :info
-    # ap dump.pe.image_file_header
+    log 'Timestamp: ' + DateTime.strptime(dump.pe.image_file_header.TimeDateStamp.to_s, '%s').strftime('%x %T')
     log 'Analyzing File Optional Header', :info
-    # ap dump.pe.image_optional_header
+    log "Image size: #{dump.pe.image_optional_header.SizeOfImage}"
+    debug = dump.pe.image_optional_header.DataDirectory.find { |d| d['type'] == 'DEBUG' }
+    log "Debug directory present at offset #{debug.va}" if debug&.va&.positive?
   end
 
   def analyze_sections
@@ -235,9 +239,9 @@ class Pear
     dump.pe.section_table.each do |section|
       section_name = section.Name
       if section_name.in? Pear::POPULAR_SECTION_NAMES.keys.map(&:to_s)
-        log "Unsuspicious section name: #{section_name}"
-      elsif section_name.in? Pear::COMMON_SECTION_NAMES.keys.map(&:to_s)
-        log "Known packer section name: #{section_name} (#{Pear::COMMON_SECTION_NAMES[section_name.to_sym]})", :suspicious
+        log "Unsuspicious section name: #{section_name} (#{Pear::POPULAR_SECTION_NAMES[section_name.to_sym]})"
+      elsif section_name.in? Pear::COMMON_PACKER_SECTION_NAMES.keys.map(&:to_s)
+        log "Known packer section name: #{section_name} (#{Pear::COMMON_PACKER_SECTION_NAMES[section_name.to_sym]})", :suspicious
       else
         log "Unrecognized section name: #{section_name}", :warn
       end
@@ -252,7 +256,7 @@ class Pear
   end
 
   def analyze_imports
-    log "Analyzing #{pluralize(dump.imports.size, 'Import')}", :info
+    log "Analyzing #{pluralize(dump.imports.size, 'Imported Module')}", :info
     imports = dump.imports
     formatted_imports = []
     imphash_failure = false
@@ -271,15 +275,20 @@ class Pear
         end
       end
     end
-    unless imphash_failure
-      log "Imphash: #{Digest::MD5.hexdigest formatted_imports.join(',')}"
-    end
+    log "Imphash: #{Digest::MD5.hexdigest formatted_imports.join(',')}" unless imphash_failure
   end
 
   def analyze_resources
     log "Analyzing #{pluralize(dump.resources.size, 'Resource')}", :info
     dump.resources.each do |resource|
-      log "#{resource.name} (#{resource.type}): #{resource.size} bytes"
+      msg = "#{resource.name} (#{resource.type}): #{resource.size} bytes"
+      if resource.type.in? PEdump::ROOT_RES_NAMES
+        log msg
+      elsif resource.type.in? SCARY_RESOURCE_TYPES
+        log msg + ' - dangerous resource type.', :warn
+      else
+        log msg + ' - unrecognized resource type.', :suspicious
+      end
     end
   end
 
