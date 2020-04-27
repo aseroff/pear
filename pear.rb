@@ -305,7 +305,7 @@ class Pear
   end
 end
 
-puts 'Running PE Analyzer in Ruby (PEar) v0.1'.hl(:blue)
+puts 'Running PE Analyzer in Ruby (PEar) v1.0'.hl(:blue)
 pear = Pear.new(path: ARGV[0])
 if pear.path
   if pear.static_analysis
