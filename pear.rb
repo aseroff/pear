@@ -3,13 +3,14 @@
 require 'os'
 require 'pedump'
 require 'digest/md5'
+require 'pathname'
 require 'action_view'
 require 'colors'
 
 include ActionView::Helpers::TextHelper
 
 class Pear
-  attr_reader :path, :dump, :hash, :warnings
+  attr_reader :path, :opts, :dump, :hash, :warnings
 
   URL_REGEX = %r{\A(?:(?:https?|ftp)://)(?:\S+(?::\S*)?@)?(?:(?!10(?:\.\d{1,3}){3})(?!127(?:\.\d{1,3}){3})(?!169\.254(?:\.\d{1,3}){2})(?!192\.168(?:\.\d{1,3}){2})(?!172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})(?:[1-9]\d?|1\d\d|2[01]\d|22[0-3])(?:\.(?:1?\d{1,2}|2[0-4]\d|25[0-5])){2}(?:\.(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-4]))|(?:(?:[a-z\u00a1-\uffff0-9]+-?)*[a-z\u00a1-\uffff0-9]+)(?:\.(?:[a-z\u00a1-\uffff0-9]+-?)*[a-z\u00a1-\uffff0-9]+)*(?:\.(?:[a-z\u00a1-\uffff]{2,})))(?::\d{2,5})?(?:/[^\s]*)?\z}i.freeze
 
@@ -193,18 +194,44 @@ class Pear
     '.y0da': 'Y0da Protector'
   }.freeze
 
-  def initialize(**params)
-    @path = params[:path]
-    @dump = PEdump.dump @path
-    @hash = Digest::MD5.hexdigest(File.open(@path).read)
+  def initialize(path, opts = [])
+    @path = path
+    @opts = opts || []
     @warnings = []
+  end
+
+  def dump
+    @dump ||= PEdump.dump path
+  end
+
+  def hash
+    @hash ||= Digest::MD5.hexdigest(File.open(path).read)
+  end
+
+  def run_analysis
+    if static_analysis
+      log 'Static analysis completed successfully.', :success
+    else
+      log 'Static analysis failed to complete successfully.', :warn
+    end
+    if warnings.empty?
+      log '0 Warnings', :success
+    else
+      puts (pluralize(warnings.size, 'Warning').+':').hl(:yellow)
+      warnings.each { |warning| puts warning }
+      system OS.open_file_command, 'https://www.virustotal.com/gui/file/' + hash if opts.include? '-vt'
+    end
+  end
+
+  def verbose?
+    opts.include? '-v'
   end
 
   def log(message, level = :default)
     colors = { warn: :red, suspicious: :yellow, success: :green, info: :blue }
     message = (level == :default ? message : message.hl(colors[level].to_sym))
     warnings << message if level.in? %i[warn suspicious]
-    puts message
+    puts message unless level == :default && !verbose?
   end
 
   def static_analysis
@@ -306,23 +333,13 @@ class Pear
 end
 
 puts 'Running PE Analyzer in Ruby (PEar) v1.0'.hl(:blue)
-pear = Pear.new(path: ARGV[0])
-if pear.path
-  if pear.static_analysis
-    pear.log 'Static analysis completed successfully.', :success
-  else
-    pear.log 'Static analysis failed to complete successfully.', :warn
-  end
-  if pear.warnings.empty?
-    pear.log '0 Warnings', :success
-  else
-    puts pluralize(pear.warnings.size, 'Warning').+':'.hl(:yellow)
-    pear.warnings.each { |warning| puts warning }
-    unless ARGV[1] == '-nvt'
-      system OS.open_file_command, 'https://www.virustotal.com/gui/file/' + pear.hash
-    end
-  end
+filepath, *opts = ARGV
+pear = Pear.new(filepath, opts)
+if Pathname.new(pear.path).exist?
+  pear.run_analysis
+  puts 'Terminating PEar successfully!'.hl(:green)
 else
-  puts 'Path to PE file required.'.hl(:red)
+  puts 'File not found: PEar terminating unsuccessfully.'.hl(:red)
+
 end
-puts 'Terminating PEar successfully!'.hl(:green)
+
