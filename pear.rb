@@ -196,7 +196,7 @@ class Pear
 
   def initialize(path, opts = [])
     @path = path
-    @opts = opts || []
+    @opts = opts
     @warnings = []
   end
 
